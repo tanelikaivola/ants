@@ -12,28 +12,47 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 use pnet_packet::MutablePacket;
 
-/// Function to create an ARP reply packet
-fn create_arp_packet(
-    ethernet_packet: &mut MutableEthernetPacket,
-    sender_mac: MacAddr,
-    sender_ip: Ipv4Addr,
-    target_mac: MacAddr,
-    target_ip: Ipv4Addr,
-) {
-    let mut arp_packet = MutableArpPacket::new(ethernet_packet.payload_mut()).unwrap();
-    arp_packet.set_hardware_type(ArpHardwareTypes::Ethernet);
-    arp_packet.set_protocol_type(EtherTypes::Ipv4);
-    arp_packet.set_hw_addr_len(6);
-    arp_packet.set_proto_addr_len(4);
-    arp_packet.set_operation(ArpOperations::Reply);
-    arp_packet.set_sender_hw_addr(sender_mac);
-    arp_packet.set_sender_proto_addr(sender_ip);
-    arp_packet.set_target_hw_addr(target_mac);
-    arp_packet.set_target_proto_addr(target_ip);
+/// Function to listen to ARP traffic and return target and sender IP addresses on detection
+pub fn listen_arp(interface_name: &str) -> (Ipv4Addr, Ipv4Addr) {
+    let interfaces = pnet_datalink::interfaces();
+    let interface = interfaces.into_iter()
+        .find(|iface| iface.name == interface_name)
+        .expect(&format!("No such interface: {}", interface_name));
+
+    let (_, mut rx) = match pnet_datalink::channel(&interface, Default::default()) {
+        Ok(Ethernet(tx, rx)) => (tx, rx),
+        Ok(_) => panic!("Unhandled channel type"),
+        Err(e) => panic!("Error creating channel: {}", e),
+    };
+
+    println!("Listening for ARP requests on {}", interface.name);
+
+    // A map to track ARP request counts for each target IP address
+    let mut arp_request_count: HashMap<IpAddr, (u32, Instant, IpAddr)> = HashMap::new();
+    let request_threshold: u32 = 2;
+    let request_timeout = Duration::from_secs(5);
+
+    loop {
+        match rx.next() {
+            Ok(packet) => {
+                let ethernet_packet = EthernetPacket::new(packet).unwrap();
+                if let Some((target_ip, sender_ip)) = process_arp_packet(
+                    &ethernet_packet,
+                    &mut arp_request_count,
+                    request_threshold,
+                    request_timeout
+                ) {
+                    return (target_ip, sender_ip);
+                }
+            }
+            Err(e) => {
+                println!("An error occurred while reading: {}", e);
+            }
+        }
+    }
 }
 
-/// Function to send an ARP reply
-fn send_arp_reply(
+pub fn send_arp_reply(
     interface_name: &str,
     target_ip: Ipv4Addr,
     target_mac: MacAddr,
@@ -67,19 +86,36 @@ fn send_arp_reply(
     Ok(())
 }
 
-/// Function to handle ARP request tracking
+fn create_arp_packet(
+    ethernet_packet: &mut MutableEthernetPacket,
+    sender_mac: MacAddr,
+    sender_ip: Ipv4Addr,
+    target_mac: MacAddr,
+    target_ip: Ipv4Addr,
+) {
+    let mut arp_packet = MutableArpPacket::new(ethernet_packet.payload_mut()).unwrap();
+    arp_packet.set_hardware_type(ArpHardwareTypes::Ethernet);
+    arp_packet.set_protocol_type(EtherTypes::Ipv4);
+    arp_packet.set_hw_addr_len(6);
+    arp_packet.set_proto_addr_len(4);
+    arp_packet.set_operation(ArpOperations::Reply);
+    arp_packet.set_sender_hw_addr(sender_mac);
+    arp_packet.set_sender_proto_addr(sender_ip);
+    arp_packet.set_target_hw_addr(target_mac);
+    arp_packet.set_target_proto_addr(target_ip);
+}
+
 fn track_arp_request(
-    arp_request_count: &mut HashMap<IpAddr, (u32, Instant)>,
+    arp_request_count: &mut HashMap<IpAddr, (u32, Instant, IpAddr)>,
     target_ip: Ipv4Addr,
     request_threshold: u32,
     request_timeout: Duration,
-    sender_mac: MacAddr,
-    interface_name: &str,
-) {
+    sender_ip: Ipv4Addr,
+) -> Option<(Ipv4Addr, Ipv4Addr)> {
     let now = Instant::now();
     let entry = arp_request_count
         .entry(IpAddr::V4(target_ip))
-        .or_insert((0, now));
+        .or_insert((0, now, IpAddr::V4(sender_ip)));
 
     if now.duration_since(entry.1) > request_timeout {
         entry.0 = 0;
@@ -94,22 +130,18 @@ fn track_arp_request(
             request_threshold, target_ip
         );
 
-        if let Err(e) = send_arp_reply(interface_name, target_ip, sender_mac, target_ip, sender_mac) {
-            eprintln!("Failed to send ARP reply: {}", e);
-        }
-
-        entry.0 = 0;
+        return Some((target_ip, sender_ip));
     }
+
+    None
 }
 
-/// Function to process incoming ARP packets
 fn process_arp_packet(
     ethernet_packet: &EthernetPacket,
-    arp_request_count: &mut HashMap<IpAddr, (u32, Instant)>,
+    arp_request_count: &mut HashMap<IpAddr, (u32, Instant, IpAddr)>,
     request_threshold: u32,
     request_timeout: Duration,
-    interface_name: &str,
-) {
+) -> Option<(Ipv4Addr, Ipv4Addr)> {
     if let Some(arp_packet) = ArpPacket::new(ethernet_packet.payload()) {
         let target_ip = Ipv4Addr::from(arp_packet.get_target_proto_addr());
         let sender_ip = Ipv4Addr::from(arp_packet.get_sender_proto_addr());
@@ -118,13 +150,12 @@ fn process_arp_packet(
         match arp_packet.get_operation() {
             ArpOperations::Request => {
                 println!("ARP Request: {} is asking for {}", sender_ip, target_ip);
-                track_arp_request(
+                return track_arp_request(
                     arp_request_count,
                     target_ip,
                     request_threshold,
                     request_timeout,
-                    sender_hw,
-                    interface_name,
+                    sender_ip,
                 );
             }
             ArpOperations::Reply => {
@@ -134,46 +165,5 @@ fn process_arp_packet(
             _ => {}
         }
     }
-}
-
-/// Function to listen for ARP requests and replies
-pub fn listen_arp() {
-
-    let interfaces = pnet_datalink::interfaces();
-    let interface_name = "eth0";
-    let interface = interfaces.into_iter()
-        .find(|iface| iface.name == interface_name)
-        .expect(&format!("No such interface: {}", interface_name));
-
-    let (_, mut rx) = match pnet_datalink::channel(&interface, Default::default()) {
-        Ok(Ethernet(tx, rx)) => (tx, rx),
-        Ok(_) => panic!("Unhandled channel type"),
-        Err(e) => panic!("Error creating channel: {}", e),
-    };
-
-    println!("Listening for ARP requests on {}", interface.name);
-
-    // A map to track ARP request counts for each target IP address
-    let mut arp_request_count: HashMap<IpAddr, (u32, Instant)> = HashMap::new();
-    let request_threshold: u32 = 2;
-    let request_timeout = Duration::from_secs(5);
-
-    loop {
-        match rx.next() {
-            Ok(packet) => {
-                let ethernet_packet = EthernetPacket::new(packet).unwrap();
-                // Process the ARP packet
-                process_arp_packet(
-                    &ethernet_packet,
-                    &mut arp_request_count,
-                    request_threshold,
-                    request_timeout,
-                    "macvlan0",
-                );
-            }
-            Err(e) => {
-                println!("An error occurred while reading: {}", e);
-            }
-        }
-    }
+    None
 }
