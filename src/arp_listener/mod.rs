@@ -178,10 +178,10 @@ fn track_arp_request(
 
     if now.duration_since(entry.1) > request_timeout {
         entry.0 = 0;
-        entry.1 = now;
     }
 
     entry.0 += 1;
+    entry.1 = now;
 
     if entry.0 >= request_threshold {
         println!(

@@ -24,6 +24,7 @@ pub fn start_tcp_tarpitting(interface_name: &str, virtual_ip: Ipv4Addr, passive_
     let mut cap = pcap::Capture::from_device(device)
         .unwrap()
         .immediate_mode(true)
+        .timeout(10000)
         .open()
         .unwrap();
 
