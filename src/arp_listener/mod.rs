@@ -57,8 +57,6 @@ fn listen_arp(
     arp_request_counts: &mut HashMap<(IpAddr, IpAddr), (u32, Instant)>,
     channel: &mut DataLinkChannel,
 ) -> ArpInfo {
-    println!("Listening for ARP requests on {}", channel.interface);
-
     // A map to track ARP request counts for each target IP address
     let request_threshold: u32 = 2;
     let request_timeout = Duration::from_secs(5);

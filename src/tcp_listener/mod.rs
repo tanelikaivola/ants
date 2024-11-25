@@ -6,48 +6,113 @@ use pnet::packet::Packet;
 use pnet::util::checksum;
 use pnet_base::MacAddr;
 use pnet_packet::ethernet::MutableEthernetPacket;
+use std::collections::HashMap;
 use std::net::Ipv4Addr;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 // start listening to tcp and respond to TCP handshakes in the given interface
-pub fn start_tcp_tarpitting(interface_name: &str, virtual_ip: Ipv4Addr, passive_mode: bool) {
-    let device = pcap::Device::list()
-        .unwrap()
-        .into_iter()
-        .find(|dev| dev.name == interface_name)
-        .unwrap_or_else(|| {
-            eprintln!("Could not find device {}", interface_name);
-            std::process::exit(1);
-        });
+pub fn start_tcp_tarpitting(
+    interface_name: &str,
+    ip_receiver: mpsc::Receiver<Ipv4Addr>,
+    passive_mode: bool,
+) {
+    let interface_name = interface_name.to_string();
+    thread::spawn(move || {
+        let device = pcap::Device::list()
+            .unwrap()
+            .into_iter()
+            .find(|dev| dev.name == interface_name)
+            .unwrap_or_else(|| {
+                eprintln!("Could not find device {}", interface_name);
+                std::process::exit(1);
+            });
 
-    let mut cap = pcap::Capture::from_device(device)
-        .unwrap()
-        .immediate_mode(true)
-        .timeout(10000)
-        .open()
-        .unwrap();
+        let mut cap = pcap::Capture::from_device(device)
+            .unwrap()
+            .immediate_mode(true)
+            .open()
+            .unwrap();
 
-    println!(
-        "Listening for incoming TCP SYN packets on interface {}...",
-        interface_name
-    );
+        println!(
+            "Listening for incoming TCP SYN packets on interface {}...",
+            interface_name
+        );
 
-    let timeout_duration = Duration::new(10, 0);
-    let mut last_response_time = Instant::now();
+        let ips_to_tarpit: Arc<Mutex<HashMap<Ipv4Addr, Instant>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
-    while let Ok(packet) = cap.next_packet() {
-        let response_sent = handle_packet(packet.data, interface_name, virtual_ip, passive_mode);
+        while let Ok(packet) = cap.next_packet() {
+            while let Ok(ip) = ip_receiver.try_recv() {
+                let mut ips = ips_to_tarpit.lock().unwrap();
+                ips.insert(ip, Instant::now());
+            }
 
-        if response_sent {
-            last_response_time = Instant::now()
+            if validate_tcp_syn_packet(packet.data) {
+                let dst_ip = Ipv4Addr::new(
+                    packet.data[30],
+                    packet.data[31],
+                    packet.data[32],
+                    packet.data[33],
+                );
+
+                {
+                    let ips = ips_to_tarpit.lock().unwrap();
+                    if !ips.contains_key(&dst_ip) {
+                        continue;
+                    }
+                }
+
+                let packet_data = packet.data.to_vec();
+                let interface_name = interface_name.to_string();
+                let passive_mode = passive_mode;
+                let ips_to_tarpit_clone = Arc::clone(&ips_to_tarpit);
+
+                thread::spawn(move || {
+                    if let Some(response_ip) =
+                        handle_packet(&packet_data, &interface_name, passive_mode)
+                    {
+                        if response_ip == dst_ip {
+                            let mut ips = ips_to_tarpit_clone.lock().unwrap();
+                            ips.insert(dst_ip, Instant::now());
+                            println!("Response sent for IP: {}", dst_ip);
+                        }
+                    }
+                });
+            }
+
+            {
+                let mut ips = ips_to_tarpit.lock().unwrap();
+                ips.retain(|_, &mut last_time| last_time.elapsed() < Duration::from_secs(5));
+            }
         }
+    });
+}
 
-        if last_response_time.elapsed() >= timeout_duration {
-            println!("No response sent in the last 10 seconds, exiting tcp_listener.");
-            break;
-        }
+fn validate_tcp_syn_packet(packet_data: &[u8]) -> bool {
+    // Minimum packet size: Ethernet (14 bytes) + IPv4 (20 bytes) + TCP (20 bytes)
+    if packet_data.len() < 54 {
+        return false;
     }
+
+    let ethertype = u16::from_be_bytes([packet_data[12], packet_data[13]]);
+    if ethertype != 0x0800 {
+        return false; // Not an IPv4 packet
+    }
+
+    let protocol = packet_data[23];
+    if protocol != 6 {
+        return false; // Not a TCP packet
+    }
+
+    let tcp_offset = 34; // Ethernet (14 bytes) + IPv4 (20 bytes, no options)
+    let tcp_flags = packet_data[tcp_offset + 13];
+
+    let syn_flag = tcp_flags & 0b0000_0010 != 0;
+    let ack_flag = tcp_flags & 0b0001_0000 != 0;
+
+    syn_flag && !ack_flag
 }
 
 fn send_syn_ack(
@@ -112,22 +177,9 @@ fn send_syn_ack(
     }
 }
 
-fn handle_packet(packet: &[u8], interface: &str, virtual_ip: Ipv4Addr, passive_mode: bool) -> bool {
-    if packet.len() < 54 {
-        return false;
-    }
-
-    let ethertype = u16::from_be_bytes([packet[12], packet[13]]);
-
-    if ethertype != 0x0800 {
-        return false;
-    }
-
+fn handle_packet(packet: &[u8], interface: &str, passive_mode: bool) -> Option<Ipv4Addr> {
     let src_ip = Ipv4Addr::new(packet[26], packet[27], packet[28], packet[29]);
     let dst_ip = Ipv4Addr::new(packet[30], packet[31], packet[32], packet[33]);
-    if dst_ip != virtual_ip {
-        return false;
-    }
 
     let src_mac = MacAddr::new(
         packet[6], packet[7], packet[8], packet[9], packet[10], packet[11],
@@ -135,31 +187,22 @@ fn handle_packet(packet: &[u8], interface: &str, virtual_ip: Ipv4Addr, passive_m
 
     let src_port = u16::from_be_bytes([packet[34], packet[35]]);
     let dst_port = u16::from_be_bytes([packet[36], packet[37]]);
-    let tcp_flags = packet[47];
     let received_seq_num = u32::from_be_bytes([packet[38], packet[39], packet[40], packet[41]]);
 
-    // Check if packet is a SYN packet
-    if tcp_flags & 0x02 != 0 {
-        println!(
-            "Received SYN from {}:{} to {}:{}",
-            src_ip, src_port, dst_ip, dst_port
+    if !passive_mode {
+        thread::sleep(Duration::from_millis(500));
+        send_syn_ack(
+            interface,
+            src_mac,
+            dst_ip,
+            src_ip,
+            dst_port,
+            src_port,
+            received_seq_num,
         );
 
-        if !passive_mode {
-            thread::sleep(Duration::from_millis(600));
-            send_syn_ack(
-                interface,
-                src_mac,
-                dst_ip,
-                src_ip,
-                dst_port,
-                src_port,
-                received_seq_num,
-            );
-        }
-
-        return true;
+        return Some(dst_ip);
     }
 
-    false
+    None
 }
