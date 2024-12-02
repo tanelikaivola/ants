@@ -3,7 +3,7 @@ use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::MutableIpv4Packet;
 use pnet::packet::tcp::{MutableTcpPacket, TcpFlags};
 use pnet::packet::Packet;
-use pnet::util::checksum;
+use pnet::util::{checksum, ipv4_checksum};
 use pnet_base::MacAddr;
 use pnet_packet::ethernet::MutableEthernetPacket;
 use std::collections::HashMap;
@@ -84,7 +84,7 @@ pub fn start_tcp_tarpitting(
 
             {
                 let mut ips = ips_to_tarpit.lock().unwrap();
-                ips.retain(|_, &mut last_time| last_time.elapsed() < Duration::from_secs(5));
+                ips.retain(|_, &mut last_time| last_time.elapsed() < Duration::from_secs(120));
             }
         }
     });
@@ -147,6 +147,10 @@ fn send_syn_ack(
         ipv4_packet.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
         ipv4_packet.set_source(src_ip);
         ipv4_packet.set_destination(dst_ip);
+        ipv4_packet.set_checksum(0);
+
+        let ipv4_checksum = checksum(ipv4_packet.packet(), 10);
+        ipv4_packet.set_checksum(ipv4_checksum);
     }
 
     {
@@ -163,7 +167,14 @@ fn send_syn_ack(
         tcp_packet.set_window(1024);
         tcp_packet.set_checksum(0);
 
-        let tcp_checksum = checksum(tcp_packet.packet(), 1);
+        let tcp_checksum = ipv4_checksum(
+            tcp_packet.packet(),
+            28,
+            &[],
+            &src_ip,
+            &dst_ip,
+            IpNextHeaderProtocols::Tcp,
+        );
         tcp_packet.set_checksum(tcp_checksum);
     }
 

@@ -93,7 +93,7 @@ fn listen_arp(
 fn send_arp_reply(arp_request_info: &ArpInfo, passive_mode: bool, channel: &mut DataLinkChannel) {
     let arp_reply_info = ArpInfo {
         sender_ip: arp_request_info.target_ip,
-        target_ip: arp_request_info.target_ip,
+        target_ip: arp_request_info.sender_ip,
         sender_mac: channel.mac_address,
         target_mac: arp_request_info.sender_mac,
     };
