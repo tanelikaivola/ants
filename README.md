@@ -2,9 +2,9 @@ ANTS is a tcp tarpitter made with Rust.
 
 # Usage
 Start the application with:
-
+```console
 sudo cargo run --release -- -i <interface_name> [--passive | -p] [--log-level <level>]
-
+```
 Required Flags:
 
 -i <interface_name>: Specify the network interface to use.
