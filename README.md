@@ -42,4 +42,5 @@ docker exec -it scanner bash
 ```
 # Relevant work:
 https://github.com/Hirato/LaBrea/
+
 https://www.cmand.org/papers/degreaser-acsac14.pdf
