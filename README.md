@@ -41,6 +41,8 @@ After docker compose up open new terminal for interactive use of nmap
 docker exec -it scanner bash
 ```
 # Relevant work:
+https://labrea.sourceforge.io/Intro-History.html
+
 https://github.com/Hirato/LaBrea/
 
 https://www.cmand.org/papers/degreaser-acsac14.pdf
