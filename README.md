@@ -1,6 +1,19 @@
-Relevant work:
-https://www.cmand.org/papers/degreaser-acsac14.pdf
+ANTS is a tcp tarpitter made with Rust.
 
+# Usage
+Start the application with:
+
+sudo cargo run --release -- -i <interface_name> [--passive | -p] [--log-level <level>]
+
+Required Flags:
+
+-i <interface_name>: Specify the network interface to use.
+
+Optional Flags:
+
+--passive or -p: Run in passive mode. By default, the application runs in active mode. In passive mode any responses are not sent.
+
+--log-level <level>: Set the logging level (debug, info, error). Defaults to info.
 
 # Docker running
 
@@ -27,4 +40,6 @@ After docker compose up open new terminal for interactive use of nmap
 ```console
 docker exec -it scanner bash
 ```
-
+# Relevant work:
+https://github.com/Hirato/LaBrea/
+https://www.cmand.org/papers/degreaser-acsac14.pdf
