@@ -1,5 +1,8 @@
 ANTS is a tcp tarpitter made with Rust.
 
+More about ANTS:
+https://medium.com/sensorfu/scanners-beware-welcome-to-the-network-from-hell-86989f29f17b
+
 # Usage
 Start the application with:
 ```console
