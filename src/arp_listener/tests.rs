@@ -194,7 +194,7 @@ fn test_track_arp_request_no_threshold_reached() {
         request_timeout,
     );
 
-    assert_eq!(result, false);
+    assert!(!result);
     assert_eq!(
         arp_request_count[&(
             IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)),
@@ -232,11 +232,12 @@ fn test_track_arp_request_threshold_reached() {
         request_timeout,
     );
 
-    assert_eq!(result, true);
+    assert!(result);
     assert!(arp_request_count.is_empty());
 }
 
 #[test]
+#[allow(clippy::unchecked_duration_subtraction)]
 fn test_track_arp_request_timeout_resets_count() {
     let mock_arp_packet = MockArpPacket::new(
         Ipv4Addr::new(192, 168, 0, 1),
@@ -262,7 +263,7 @@ fn test_track_arp_request_timeout_resets_count() {
         request_timeout,
     );
 
-    assert_eq!(result, false);
+    assert!(!result);
     assert_eq!(
         arp_request_count[&(
             IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)),

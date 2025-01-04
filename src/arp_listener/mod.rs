@@ -57,7 +57,7 @@ pub fn start_arp_handling(interface_name: &str, passive_mode: bool) -> mpsc::Rec
 
     thread::spawn(move || {
         let mut arp_request_counts: HashMap<(IpAddr, IpAddr), (u32, Instant)> = HashMap::new();
-        let mut channel = open_channel(interface_name);
+        let mut channel = open_channel(&interface_name);
         loop {
             let arp_request_info = listen_arp(&mut arp_request_counts, &mut channel);
             send_arp_reply(&arp_request_info, passive_mode, &mut channel);
@@ -139,12 +139,12 @@ fn send_arp_reply(arp_request_info: &ArpInfo, passive_mode: bool, channel: &mut 
     );
 }
 
-fn open_channel(interface_name: String) -> DataLinkChannel {
-    let interface = get_interface(&interface_name);
-    let (tx, rx) = match pnet_datalink::channel(&interface, Default::default()) {
+fn open_channel(interface_name: &str) -> DataLinkChannel {
+    let interface = get_interface(interface_name);
+    let (tx, rx) = match pnet_datalink::channel(&interface, pnet_datalink::Config::default()) {
         Ok(Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => panic!("Unhandled channel type"),
-        Err(e) => panic!("Error creating channel: {}", e),
+        Err(e) => panic!("Error creating channel: {e}"),
     };
 
     let mac_address = interface.mac.unwrap_or_default();
@@ -162,7 +162,7 @@ fn get_interface(interface_name: &str) -> pnet_datalink::NetworkInterface {
     let interface: pnet_datalink::NetworkInterface = interfaces
         .into_iter()
         .find(|iface| iface.name == interface_name)
-        .unwrap_or_else(|| panic!("No such interface: {}", interface_name));
+        .unwrap_or_else(|| panic!("No such interface: {interface_name}"));
 
     interface
 }

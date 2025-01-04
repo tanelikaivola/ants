@@ -29,7 +29,7 @@ pub fn start_tcp_tarpitting(
             .into_iter()
             .find(|dev| dev.name == interface_name)
             .unwrap_or_else(|| {
-                eprintln!("Could not find device {}", interface_name);
+                eprintln!("Could not find device {interface_name}");
                 std::process::exit(1);
             });
 
@@ -141,7 +141,7 @@ fn create_syn_ack_packet(
 
         ipv4_packet.set_version(4);
         ipv4_packet.set_header_length(5);
-        ipv4_packet.set_total_length((20 + 20) as u16);
+        ipv4_packet.set_total_length(20 + 20);
         ipv4_packet.set_ttl(64);
         ipv4_packet.set_flags(Ipv4Flags::DontFragment);
         ipv4_packet.set_next_level_protocol(pnet::packet::ip::IpNextHeaderProtocols::Tcp);
@@ -205,13 +205,13 @@ fn send_syn_ack(
         received_seq_num,
     );
 
-    match datalink::channel(&interface, Default::default()) {
+    match datalink::channel(&interface, datalink::Config::default()) {
         Ok(Ethernet(mut tx, _)) => {
             let _ = tx.send_to(&eth_buffer, None).unwrap();
             debug!("Sent SYN/ACK packet");
         }
         Ok(_) => panic!("Unhandled channel type"),
-        Err(e) => panic!("Failed to send packet: {}", e),
+        Err(e) => panic!("Failed to send packet: {e}"),
     }
 }
 

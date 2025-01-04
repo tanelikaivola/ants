@@ -14,3 +14,13 @@ pnet_base = "0.35.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.5.23", default-features = false, features = ["derive", "cargo", "error-context", "help", "std", "suggestions", "usage"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+rust_2021_compatibility = { level = "warn", priority = -1 }
+future_incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+
+[lints.clippy]
+pedantic = "warn"
+style = "warn"

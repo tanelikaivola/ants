@@ -9,7 +9,7 @@ use tracing_subscriber::EnvFilter;
 
 fn init_tracing(log_level: &str) {
     let filter = EnvFilter::try_new(log_level).unwrap_or_else(|_| {
-        eprintln!("Invalid log level: {}. Defaulting to 'info'.", log_level);
+        eprintln!("Invalid log level: {log_level}. Defaulting to 'info'.");
         EnvFilter::new("info")
     });
 
