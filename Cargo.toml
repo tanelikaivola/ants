@@ -13,3 +13,4 @@ pnet_datalink = "0.35.0"
 pnet_base = "0.35.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5.23", default-features = false, features = ["derive", "cargo", "error-context", "help", "std", "suggestions", "usage"] }
